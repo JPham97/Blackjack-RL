@@ -1,3 +1,9 @@
+'''
+Jeremy Pham
+A12962840
+CSE 150 PA 4
+'''
+
 import pygame, sys, random, copy
 from pygame.locals import *
 from cards import *
@@ -34,12 +40,12 @@ def initGame(cList, uList, dList):
 
 def make_state(userSum, userA, dealFirst, dealAFirst):
     #Eliminate duplicated bust cases
-    if userSum > 21: 
+    if userSum > 21:
         userSum = 22
     #userSum: sum of user's cards
     #userA: number of user's Aces
     #dealFirst: value of dealer's first card
-    #dealAFirst: whether dealer's first card is Ace   
+    #dealAFirst: whether dealer's first card is Ace
     return (userSum, userA, dealFirst, dealAFirst)
 
 def policy(userSum):
@@ -69,6 +75,7 @@ def simulation_sequence(policy, state, userCard, dealCard, ccards):
         # calculate reward
         if not (gameover or stand):
             episode.append((state,0))
+        # happens if the gameover = True or stand = True
         else:
             if userSum == dealSum:
                 reward = 0
@@ -104,13 +111,105 @@ def simulation_sequence(policy, state, userCard, dealCard, ccards):
                         dealSum -= 10
         state = make_state(userSum, userA, dealFirst, dealAFirst)
 
-def simulate_one_step(state, action, userCard, dealCard, ccards, stand):
-    #Need to implement this for TD and QL
-    pass
+def check_game_over(state, userCard):
+    userSum = state[0]
+    userA = state[1]
+    gameover = False
 
+    if (userSum >= 21 and userA == 0) or len(userCard) == 5:
+        gameover = True
+    else:
+        gameover = False
+    if len(userCard) == 2 and userSum == 21:
+        gameover = True
+
+    return gameover
+
+def simulate_one_step(state, action, userCard, dealCard, ccards, stand):
+    # should return the next state that follows after simulation is done on state
+    episode = []
+    userSum = state[0]
+    userA = state[1]
+    dealSum = state[2]
+    dealA = state[3]
+    dealFirst = state[2]
+    dealAFirst = state[3]
+
+    gameover = check_game_over(state, userCard)
+
+    # if game is over, a terminal state is found, next_state is null
+    if (gameover or stand):
+        next_state = None
+        episode = (next_state,0)
+        return (episode,stand)
+
+    # game is NOT over so perform an action
+    # next two cases alter game state
+
+    # do NOT stand, hit
+    if action == 0:
+        #Give player a card
+        card, cA = genCard(ccards, userCard)
+        userA += cA
+        userSum += getAmt(card)
+        while userSum > 21 and userA > 0:
+            userA -= 1
+            userSum -= 10
+    # stand, since over 17
+    elif action == 1:
+        #Dealer plays, user stands
+        stand = True
+        if dealSum == 21:
+            pass
+        else:
+            while dealSum <= userSum and dealSum < 17:
+                card, cA = genCard(ccards, dealCard)
+                dealA += cA
+                dealSum += getAmt(card)
+                while dealSum > 21 and dealA > 0:
+                    dealA -= 1
+                    dealSum -= 10
+
+    next_state = make_state(userSum, userA, dealFirst, dealAFirst)
+    gameover = check_game_over(next_state, userCard)
+
+    # if bust, win, or stand, need to collect rewards
+    if (gameover or stand):
+        reward = 0
+        if userSum == dealSum:
+            reward = 0
+        elif userSum <= 21 and len(userCard) == 5:
+            reward = 1
+        elif userSum <= 21 and dealSum < userSum or dealSum > 21:
+            reward = 1
+        else:
+            reward = -1
+        episode = (next_state, reward)
+        return (episode,stand)
+
+    # game is not over in the next_state, do not calculate a reward
+    # also happens if no stand
+    else:
+        episode = (next_state, 0)
+        return (episode,stand)
+'''
+Given a single state within an episode containing a list of states, calculates
+the reward to go from the state to the terminal state at the end of the
+episode.
+'''
 def reward_to_go(s, gamma, episode):
-    # Placeholder, need to implement the right calculation
-    return 0
+    # s is a pair (state, reward)
+    # Non-zero reward should only happen with the last state
+    lastPair = episode[-1]
+    sLoc = episode.index(s)
+
+    # this will be appropriate exponent for the discount factor
+    # gamma should be raised to power of 0 if we are at the terminal state
+    i = len(episode) - sLoc - 1
+
+    # all other states will have a reward of 0 besides the last one, so the final
+    # reward to go is only calculated with the last reward
+    return (lastPair[1])*(gamma**i)
 
 def MC_Policy_Evaluation(policy, states, gamma, MCvalues, G):
     #Perform 50 simulations in each cycle in each game loop (so total number of simulations increases quickly)
@@ -125,14 +224,85 @@ def MC_Policy_Evaluation(policy, states, gamma, MCvalues, G):
         episode = simulation_sequence(policy, state, userCard, dealCard, ccards)
         # update
         for e in episode:
-            #This line is a placeholder. Remove. Need more lines too, of course. 
-            MCvalues[e[0]] += 0.001
+            # e is a pair (state, reward)
+            # state is a 4 tuple (userSum, userA, dealFirst, dealAFirst)
+            s = e[0] # e is a pair, so extract the state from it
+            G[s].append(reward_to_go(e, gamma, episode))
+            MCvalues[s] = np.average(G[s])
 
 def TD_Policy_Evaluation(policy, states, gamma, TDvalues, NTD):
-    pass
+    #Perform 50 simulations in each cycle in each game loop (so total number of simulations increases quickly)
+    for simulation in range(50):
+        # generate random game
+        userCard = []
+        dealCard = []
+        ccards = copy.copy(cards)
+        userSum, userA, dealSum, dealA, dealFirst, dealAFirst = initGame(ccards, userCard, dealCard)
+        # reward for initial states should be 0
+        state = (make_state(userSum, userA, dealFirst, dealAFirst), 0)
+        stand = False
+        while state[0] is not None:
+            # if next state is None, use 0 for all the values
+            # simulate_one_step(state, action, userCard, dealCard, ccards, stand)
+            s = state[0]
+            action = policy(s[0])
+            # get the next state by simulating the actions according to policy
+            next_state_pair = simulate_one_step(s, action, userCard, dealCard, ccards, stand)
+            stand = next_state_pair[1]
+
+            # increment the visits
+            NTD[s] += 1
+
+            # get an appropriate alpha value
+            a = 10/(9+NTD[s])
+
+            # calculate the new average
+            # if next_state is NULL, then next_state_pair[1] will be 0
+            TDvalues[s] = TDvalues[s] + a*(state[1]+(gamma*((next_state_pair[0])[1]))-TDvalues[s])
+            state = next_state_pair[0]
+
+def pick_action(s, eps, Q):
+    # eps should be positive and small
+    if random.uniform(0,1) < eps:
+        return random.randint(0,1)
+    else:
+        return np.argmax(Q[s])
 
 def Q_Learning(states, gamma, Qvalues, NQ):
-    pass
+    #Perform 50 simulations in each cycle in each game loop (so total number of simulations increases quickly)
+    for simulation in range(50):
+        # generate random game
+        userCard = []
+        dealCard = []
+        ccards = copy.copy(cards)
+        userSum, userA, dealSum, dealA, dealFirst, dealAFirst = initGame(ccards, userCard, dealCard)
+        # reward for initial states should be 0
+        state = (make_state(userSum, userA, dealFirst, dealAFirst), 0)
+        stand = False
+        eps = 0.5
+        while state[0] is not None:
+            # if next state is None, use 0 for all the values
+            # simulate_one_step(state, action, userCard, dealCard, ccards, stand)
+            s = state[0]
+            act = pick_action(s, eps, Qvalues)
+            # get the next state by simulating the actions according to policy
+            next_state_pair = simulate_one_step(s, act, userCard, dealCard, ccards, stand)
+            stand = next_state_pair[1]
+
+            # increment the visits
+            NQ[s] += 1
+
+            # get an appropriate alpha value
+            a = 10/(9+NQ[s])
+
+            # calculate the new average
+            actInQ = 0
+            # if next_state is NULL, have to use 0
+            if next_state_pair[0][0] is not None:
+                actInQ = np.argmax(Qvalues[next_state_pair[0][0]])
+            Qvalues[s][act] = Qvalues[s][act] + a*(state[1]+(gamma*max(a,actInQ))-Qvalues[s][act])
+            state = next_state_pair[0]
+
 
 def main():
     ccards = copy.copy(cards)
@@ -163,10 +333,10 @@ def main():
     Qvalues = {}
     NQ = {}
     #Initialization of the values
-    #i iterates through the sum of user's cards. It is set to 22 if the user went bust. 
-    #j iterates through the value of the dealer's first card. Ace is eleven. 
+    #i iterates through the sum of user's cards. It is set to 22 if the user went bust.
+    #j iterates through the value of the dealer's first card. Ace is eleven.
     #a1 is the number of Aces that the user has.
-    #a2 denotes whether the dealer's first card is Ace. 
+    #a2 denotes whether the dealer's first card is Ace.
     states = []
     for i in range(2,23):
         for j in range(2,12):
@@ -186,7 +356,7 @@ def main():
     #userSum: sum of user's cards
     #userA: number of user's Aces
     #dealSum: sum of dealer's cards (including hidden one)
-    #dealA: number of all dealer's Aces, 
+    #dealA: number of all dealer's Aces,
     #dealFirst: value of dealer's first card
     #dealAFirst: whether dealer's first card is Ace
     userSum, userA, dealSum, dealA, dealFirst, dealAFirst = initGame(ccards, userCard, dealCard)
@@ -277,7 +447,7 @@ def main():
                         while dealSum > 21 and dealA > 0:
                             dealA -= 1
                             dealSum -= 10
-            
+
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
@@ -360,4 +530,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
